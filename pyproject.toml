@@ -18,6 +18,9 @@ dependencies = [
     "rich>=13.0",
 ]
 
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
 [project.scripts]
 md2ti84 = "md2ti84.cli:main"
 
