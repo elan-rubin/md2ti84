@@ -16,6 +16,8 @@ def convert(
     target_height: int = 165,
     render_dpi: int = 300,
     grayscale: bool = False,
+    bilevel: bool = False,
+    threshold: int = 160,
 ) -> Path:
     """Render *pdf_path* at *render_dpi*, resize to target dimensions, save PNG.
 
@@ -27,12 +29,15 @@ def convert(
 
     img: Image.Image = images[0]
 
-    if grayscale:
+    if grayscale or bilevel:
         img = img.convert("L")
     else:
         img = img.convert("RGB")
 
     img = img.resize((target_width, target_height), Image.LANCZOS)
+
+    if bilevel:
+        img = img.point(lambda value: 255 if value >= threshold else 0, mode="1")
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     img.save(str(output_path), format="PNG")

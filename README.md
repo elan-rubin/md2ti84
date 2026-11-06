@@ -38,6 +38,18 @@ Common options:
 
 Output PNGs are placed in `<output>/images/` and named `<stem>_page01.png`, `<stem>_page02.png`, etc. Each page also produces a set of `.8xv` AppVar files (one per 80x80 tile, plus one palette file) directly in the output directory.
 
+## Label and printer output
+
+```bash
+md2ti84 board.md -o out/ --size 4x6in --font-size 14 --margin 12 --max-lines 20 --bilevel
+```
+
+- `--size 4x6in` (or `100x150mm`) sets the physical paper size; pixels are size times `--output-dpi` (default 203)
+- `--bilevel` writes 1-bit PNGs and `--threshold` sets the cutoff
+- With `--size` or `--bilevel` the `.8xv` export is skipped
+
+The pipeline is also importable: `from md2ti84.pipeline import RenderOptions, render_pages`.
+
 ## Viewing on the calculator
 
 1. Install [HD Picture Viewer](https://github.com/TheLastMillennial/HD-Picture-Viewer) (`HDPICV.8xp`) on your calculator via TI Connect CE

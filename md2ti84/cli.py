@@ -5,12 +5,11 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-import tempfile
 from pathlib import Path
 
-from . import parser as md_parser
-from . import renderer, paginator, latex_builder, compiler, image_converter, hdpic_exporter
-from .progress import track, status
+from . import hdpic_exporter
+from .pipeline import RenderOptions, parse_size, render_pages
+from .progress import status
 
 
 def _load_defaults() -> dict:
@@ -82,6 +81,22 @@ def main(argv: list[str] | None = None) -> int:
         help="Output image height in pixels (default: 240)",
     )
     ap.add_argument(
+        "--size", default=None,
+        help="Physical paper size such as 4x6in or 100x150mm; overrides --width/--height",
+    )
+    ap.add_argument(
+        "--output-dpi", type=int, default=defaults.get("output_dpi", 203),
+        help="Printer DPI used to turn --size into pixels (default: 203)",
+    )
+    ap.add_argument(
+        "--bilevel", action="store_true",
+        help="Write 1-bit black and white PNGs for thermal printers; implies --no-8xv",
+    )
+    ap.add_argument(
+        "--threshold", type=int, default=defaults.get("threshold", 160),
+        help="Gray level at or above which a pixel becomes white with --bilevel (default: 160)",
+    )
+    ap.add_argument(
         "--clean", action="store_true",
         help="Delete all files in the output directory before running",
     )
@@ -93,6 +108,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[md2ti84] Error: file not found: {md_file}", file=sys.stderr)
         return 1
 
+    try:
+        paper = parse_size(args.size) if args.size else None
+    except ValueError as error:
+        print(f"[md2ti84] Error: {error}", file=sys.stderr)
+        return 1
+
     output_dir: Path = (args.output_dir or md_file.parent).resolve()
 
     if args.clean and output_dir.exists():
@@ -101,60 +122,30 @@ def main(argv: list[str] | None = None) -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     images_dir = output_dir / "images"
-    images_dir.mkdir(parents=True, exist_ok=True)
 
-    stem = md_file.stem
+    options = RenderOptions(
+        font_size=args.font_size,
+        margin=args.margin,
+        render_dpi=args.dpi,
+        engine=args.engine,
+        max_lines=args.max_lines,
+        grayscale=not args.no_grayscale,
+        width=args.width,
+        height=args.height,
+        paper=paper,
+        output_dpi=args.output_dpi,
+        bilevel=args.bilevel,
+        threshold=args.threshold,
+    )
 
-    status(f"Parsing {md_file.name} ...")
-    text = md_file.read_text(encoding="utf-8")
-    tokens = md_parser.parse(text)
+    try:
+        png_paths = render_pages(md_file, images_dir, options)
+    except RuntimeError as error:
+        print(f"[md2ti84] Error on {error}", file=sys.stderr)
+        return 1
 
-    status("Rendering to LaTeX chunks ...")
-    chunks = renderer.render(tokens)
-
-    status(f"Paginating (max {args.max_lines} lines/page) ...")
-    pages = paginator.paginate(chunks, max_lines=args.max_lines)
-    status(f"{len(pages)} page(s) to render.")
-
-    png_paths: list[Path] = []
-
-    with tempfile.TemporaryDirectory(prefix="md2ti84_") as tmpdir:
-        tmp = Path(tmpdir)
-
-        with track(pages, "Compiling pages") as bar:
-            for page_num, page_chunks in bar:
-                page_num += 1  # track yields 0-based index
-
-                tex_content = latex_builder.build(
-                    page_chunks,
-                    font_size=args.font_size,
-                    image_width=args.width,
-                    image_height=args.height,
-                    margin=args.margin,
-                    use_lualatex=(args.engine == "lualatex"),
-                )
-                tex_path = tmp / f"{stem}_page{page_num:02d}.tex"
-                tex_path.write_text(tex_content, encoding="utf-8")
-
-                try:
-                    pdf_path = compiler.compile_tex(tex_path, tmp, engine=args.engine)
-                except RuntimeError as e:
-                    print(f"[md2ti84] Error on page {page_num}:\n{e}", file=sys.stderr)
-                    return 1
-
-                png_path = images_dir / f"{stem}_page{page_num:02d}.png"
-                image_converter.convert(
-                    pdf_path,
-                    png_path,
-                    target_width=args.width,
-                    target_height=args.height,
-                    render_dpi=args.dpi,
-                    grayscale=not args.no_grayscale,
-                )
-                png_paths.append(png_path)
-
-    if not args.no_8xv:
-        appvar_files = hdpic_exporter.export(png_paths, output_dir, prefix_base=stem[0].upper())
+    if not (args.no_8xv or args.bilevel or paper is not None):
+        appvar_files = hdpic_exporter.export(png_paths, output_dir, prefix_base=md_file.stem[0].upper())
         if appvar_files:
             status(f"Exported {len(appvar_files)} .8xv AppVar file(s).")
 
